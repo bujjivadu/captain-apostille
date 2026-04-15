@@ -1,0 +1,55 @@
+[package]
+name = "captain-apostille"
+version = "0.1.0"
+edition = "2021"
+description = "Mutually-authenticated certificate notary for the captain suite"
+
+[[bin]]
+name = "captain-apostille"
+path = "src/main.rs"
+
+[dependencies]
+# HTTP server
+axum = { version = "0.7", features = ["macros"] }
+tower = { version = "0.5" }
+hyper = { version = "1" }
+hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto", "http1", "http2"] }
+http-body-util = "0.1"
+
+# Async runtime
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "net"] }
+
+# TLS / mTLS
+tokio-rustls = { version = "0.26" }
+rustls = { version = "0.23", features = ["std"] }
+rustls-pemfile = { version = "2" }
+rustls-pki-types = { version = "1" }
+
+# X.509 client cert inspection
+x509-parser = "0.15"
+
+# Certificate generation and signing
+rcgen = { version = "0.14", features = ["pem", "x509-parser"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Password prompt (for future admin auth)
+rpassword = "7"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Base64 (EST request bodies are base64-encoded DER)
+base64 = "0.22"
+
+# Error handling
+thiserror = "1"
+
+# Time (certificate validity periods)
+time = { version = "0.3" }
