@@ -26,7 +26,10 @@ pub fn sign_csr(
     let csr_der = CertificateSigningRequestDer::from(csr_der.to_vec());
     let csr_params = CertificateSigningRequestParams::from_der(&csr_der)?;
 
-    // Enforce operational cert policy on top of whatever the CSR requested
+    // Enforce operational cert policy over whatever the CSR requested.
+    // Use CertificateParams::signed_by (not the CSR path) so that extensions
+    // like BasicConstraints and KeyUsage can be applied without hitting
+    // rcgen's UnsupportedInCsr guard.
     let mut params = csr_params.params.clone();
     let now = OffsetDateTime::now_utc();
     params.not_before = now;
@@ -35,13 +38,7 @@ pub fn sign_csr(
     params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
     params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
 
-    // Re-build as a CertificateSigningRequestParams with the policy-enforced params
-    let csr_params_enforced = CertificateSigningRequestParams {
-        params,
-        public_key: csr_params.public_key,
-    };
-
-    let cert = csr_params_enforced.signed_by(&ca.issuer)?;
+    let cert = params.signed_by(&csr_params.public_key, &ca.issuer)?;
     Ok(cert.pem())
 }
 
@@ -60,29 +57,21 @@ pub fn issue_bootstrap(
 ) -> Result<BootstrapCert> {
     let now = OffsetDateTime::now_utc();
 
-    // Build cert params for the bootstrap identity
     let mut params = CertificateParams::new(vec![])?;
     params.not_before = now;
     params.not_after = now + Duration::hours(ttl_hours as i64);
     params.distinguished_name.push(DnType::CommonName, device_id);
     params.distinguished_name.push(DnType::OrganizationName, org_name);
-    // OU=bootstrap is the marker the enrollment endpoint checks
-    params.distinguished_name.push(
-        DnType::OrganizationalUnitName,
-        "bootstrap",
-    );
+    // OU=bootstrap is the marker the enrollment endpoint checks.
+    params.distinguished_name.push(DnType::OrganizationalUnitName, "bootstrap");
     params.is_ca = IsCa::ExplicitNoCa;
     params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
     params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
 
-    // Generate the device key pair (server-side, for provisioning)
     let device_key = KeyPair::generate()?;
 
-    // Serialize to a CSR internally, then sign with CA
-    let csr = params.serialize_request(&device_key)?;
-    let csr_der = CertificateSigningRequestDer::from(csr.der().to_vec());
-    let csr_params = CertificateSigningRequestParams::from_der(&csr_der)?;
-    let cert = csr_params.signed_by(&ca.issuer)?;
+    // Sign directly — avoids UnsupportedInCsr from BasicConstraints/KeyUsage.
+    let cert = params.signed_by(&device_key, &ca.issuer)?;
 
     Ok(BootstrapCert {
         cert_pem: cert.pem(),
@@ -107,9 +96,7 @@ pub fn init_ca(
         DnType::CommonName,
         format!("{} Root CA", common_name),
     );
-    root_params
-        .distinguished_name
-        .push(DnType::OrganizationName, org_name);
+    root_params.distinguished_name.push(DnType::OrganizationName, org_name);
     root_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
     root_params.key_usages = vec![
         KeyUsagePurpose::DigitalSignature,
@@ -127,28 +114,20 @@ pub fn init_ca(
         DnType::CommonName,
         format!("{} Intermediate CA", common_name),
     );
-    int_params
-        .distinguished_name
-        .push(DnType::OrganizationName, org_name);
-    int_params.is_ca = IsCa::Ca(BasicConstraints::Constrained(0)); // can only sign leaf certs
+    int_params.distinguished_name.push(DnType::OrganizationName, org_name);
+    int_params.is_ca = IsCa::Ca(BasicConstraints::Constrained(0));
     int_params.key_usages = vec![
         KeyUsagePurpose::DigitalSignature,
         KeyUsagePurpose::KeyCertSign,
         KeyUsagePurpose::CrlSign,
     ];
 
-    // Sign intermediate CA with root
-    let int_csr = int_params.serialize_request(&int_key)?;
-    let int_csr_der = CertificateSigningRequestDer::from(int_csr.der().to_vec());
-    let int_csr_params = CertificateSigningRequestParams::from_der(&int_csr_der)?;
-
-    // Serialize root key before moving it into the issuer
     let root_key_pem = root_key.serialize_pem();
 
-    // Build a root issuer from the just-generated root cert
-    let root_issuer =
-        rcgen::Issuer::from_ca_cert_pem(&root_cert.pem(), root_key)?;
-    let int_cert = int_csr_params.signed_by(&root_issuer)?;
+    let root_issuer = rcgen::Issuer::from_ca_cert_pem(&root_cert.pem(), root_key)?;
+
+    // Sign intermediate CA params directly (CSR path rejects CA extensions).
+    let int_cert = int_params.signed_by(&int_key, &root_issuer)?;
 
     Ok(CaArtifacts {
         root_cert_pem: root_cert.pem(),

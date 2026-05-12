@@ -1,0 +1,24 @@
+[Unit]
+Description=captain-mast MQTT broker (rumqttd + mTLS)
+Documentation=https://github.com/your-org/muca
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=captain-mast
+Group=captain-mast
+ExecStart=/usr/local/bin/captain-mast --config /etc/captain-mast/mast.conf
+Restart=on-failure
+RestartSec=5s
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/captain-mast /etc/captain-mast
+
+EnvironmentFile=-/etc/captain-mast/env
+Environment=RUST_LOG=info
+
+[Install]
+WantedBy=multi-user.target

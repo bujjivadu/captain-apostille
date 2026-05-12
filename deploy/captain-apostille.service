@@ -1,0 +1,26 @@
+[Unit]
+Description=captain-apostille mTLS Certificate Authority / EST enrollment server
+Documentation=https://github.com/your-org/muca
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=captain-apostille
+Group=captain-apostille
+ExecStart=/usr/local/bin/captain-apostille --config /etc/captain-apostille/apostille.conf serve
+Restart=on-failure
+RestartSec=5s
+
+# Harden: drop all Linux capabilities, restrict filesystem access.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/captain-apostille
+ReadOnlyPaths=/etc/captain-apostille /etc/letsencrypt/live /etc/letsencrypt/archive
+
+EnvironmentFile=-/etc/captain-apostille/env
+Environment=RUST_LOG=info
+
+[Install]
+WantedBy=multi-user.target

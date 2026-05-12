@@ -38,22 +38,26 @@ pub fn build_tls_config(
     server_key_path: &Path,
 ) -> Result<Arc<ServerConfig>> {
     // ── Client-cert verifier (mTLS) ──────────────────────────────────────
-    // Load CA cert that signed the device bootstrap / operational certs.
-    let ca_der: CertificateDer<'static> = {
-        let mut pem = ca_cert_pem.as_bytes();
-        let der = rustls_pemfile::certs(&mut pem)
-            .next()
-            .ok_or_else(|| ApostilleError::Config("CA cert PEM is empty".into()))??
-            .into_owned();
-        der
-    };
-
+    // ca_cert_pem is "root + intermediate" (both needed as trust anchors:
+    // root for full-chain verification, intermediate for direct verification
+    // of leaf certs signed by the intermediate).
     let mut roots = rustls::RootCertStore::empty();
-    roots.add(ca_der).map_err(|e| {
-        ApostilleError::Config(format!("Cannot add CA cert to root store: {}", e))
-    })?;
+    let (added, ignored) = roots.add_parsable_certificates(
+        rustls_pemfile::certs(&mut ca_cert_pem.as_bytes())
+            .filter_map(|r| r.ok())
+            .map(|c| c.into_owned()),
+    );
+    if added == 0 {
+        return Err(ApostilleError::Config(
+            format!("CA cert PEM added 0 trust anchors ({} ignored)", ignored),
+        ));
+    }
 
-    let verifier = WebPkiClientVerifier::builder(Arc::new(roots)).build()?;
+    // allow_unauthenticated lets the public /cacerts endpoint work without a
+    // client cert.  The enroll/reenroll handlers enforce cert presence + type.
+    let verifier = WebPkiClientVerifier::builder(Arc::new(roots))
+        .allow_unauthenticated()
+        .build()?;
 
     // ── Server certificate (Let's Encrypt / own cert) ────────────────────
     let server_certs: Vec<CertificateDer<'static>> = {

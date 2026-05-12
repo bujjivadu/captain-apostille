@@ -1,5 +1,7 @@
 /target
 /ca/
+/.local/
 *.key
 *.crt
 *.pem
+.env
